@@ -72,7 +72,7 @@
       <longflag>disk</longflag>
       <description>Size of disk to open thresholded images</description>
       <label>Open Disk Size</label>
-      <default>1</default>
+      <default>4</default>
       <constraints>
         <minimum>0</minimum>
         <maximum>1.e3</maximum>
@@ -110,6 +110,13 @@
       <longflag>outputMergeImage</longflag>
       <label>Output Merged Image</label>
       <description>A merged image with the transformed second image and the untransformed first image</description>
+      <channel>output</channel>
+    </image>
+    <image fileExtensions=".tiff">
+      <name>outputDebugImage</name>
+      <longflag>outputDebugImage</longflag>
+      <label>Output Debug Image</label>
+      <description>A image with all of the processing steps as frames</description>
       <channel>output</channel>
     </image>
   </parameters>

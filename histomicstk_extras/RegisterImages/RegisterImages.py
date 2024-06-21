@@ -21,7 +21,6 @@ import yaml
 from histomicstk.cli.utils import CLIArgumentParser
 from histomicstk.preprocessing.color_deconvolution.stain_color_map import \
     stain_color_map
-
 from progress_helper import ProgressHelper
 
 
@@ -34,7 +33,7 @@ def annotation_to_shapely(annot, reduce=1):
     ])
 
 
-def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce):
+def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None):
     regionparams = {'format': large_image.constants.TILE_FORMAT_NUMPY}
     try:
         regionparams['frame'] = int(frame)
@@ -52,37 +51,86 @@ def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce):
         if annot['annotation']['elements'][0]['type'] == 'point':
             return annot['annotation']['elements']
         img = (rasterio.features.rasterize(
-            annotation_to_shapely(annot), out_shape=(sizeY, sizeX)) > 0).astype('bool')
+            annotation_to_shapely(annot, reduce), out_shape=(sizeY, sizeX)) > 0).astype('bool')
         img = 255.0 * img
+        debug_image(debug, img, 'annotation')
     else:
         regionparams['output'] = dict(maxWidth=ts.sizeX // reduce, maxHeight=ts.sizeY // reduce)
         img = ts.getRegion(**regionparams)[0]
         print(f'Region shape {img.shape}')
         if len(img.shape) == 3 and img.shape[-1] >= 3:
             img = img[:, :, :3]
+            debug_image(debug, img, 'source')
             # possibly get from args
-            stains = ['hematoxylin', 'eosin', 'null']
             print('Deconvolving')
+            stains = ['hematoxylin', 'eosin', 'null']
             stain_matrix = np.array([stain_color_map[stain] for stain in stains]).T
+            # stain_matrix = np.array([[0.644211, 0.716556, 0.266844],
+            #                          [0.175411, 0.972178, 0.154589],
+            #                          [0, 0, 0]]).T
             img = histomicstk.preprocessing.color_deconvolution.color_deconvolution(
                 img, stain_matrix).Stains[:, :, 0]
             img = 255 - img
+            debug_image(debug, img, 'deconvolved')
         elif len(img.shape) == 3:
             print('Using directly')
             img = img[:, :, 0]
-        img = np.pad(img, ((0, sizeY - img.shape[0]), (0, sizeX - img.shape[1])), mode='constant')
+            debug_image(debug, img, 'source')
 
         if args.threshold:
             print('Thresholding')
             img = (img > skimage.filters.threshold_otsu(img))
+            # img = (skimage.filters.threshold_local(
+            #        img / 255, block_size=151 // reduce, offset=-0.25) > 0.5)
+            debug_image(debug, img, 'threshold')
+            print(f'Thresholded, non-zero pixels: {np.sum(img)}')
             if args.smallObject:
-                img = skimage.morphology.remove_small_objects(img, args.smallObject)
+                img = skimage.morphology.remove_small_objects(img, args.smallObject / reduce)
+                print(f'Removed small objects, non-zero pixels: {np.sum(img)}')
+                debug_image(debug, img, 'removedSmallA')
             if args.disk:
-                img = skimage.morphology.binary_opening(img, skimage.morphology.disk(args.disk))
+                img = skimage.morphology.binary_opening(
+                    img, skimage.morphology.disk(max(args.disk / reduce, 1)))
+                print(f'Binary opening, non-zero pixels: {np.sum(img)}')
+                debug_image(debug, img, 'binaryOpening')
             if args.smallObject:
-                img = skimage.morphology.remove_small_objects(img, args.smallObject)
+                img = skimage.morphology.remove_small_objects(img, args.smallObject / reduce)
+                print(f'Removed small objects, non-zero pixels: {np.sum(img)}')
+                debug_image(debug, img, 'removedSmallA')
             img = 255.0 * img
+
+        debug_image(debug, img, 'processed')
     return img
+
+
+def debug_image(debug, img, tag):
+    """
+    An an image as a frame of a debug image with a unique channel tag.  Added
+    images are always at least 3 channel.
+
+    :param debug: a large_image sink image.  None to be a no-op.
+    :param img: the image to add.  If a numpy array, this will be contrast
+        extended and, if single channel, made to be 3 channels.
+    :param tag: string for channel name.
+    """
+    if not debug:
+        return
+    if isinstance(img, np.ndarray):
+        if len(img.shape) == 2:
+            img = np.resize(img, (img.shape[0], img.shape[1], 1))
+        if img.shape[-1] == 1:
+            img = np.repeat(img[:, :, 0:1], 3, axis=2)
+        img = img.astype(float)
+        if np.amax(img) > 0:
+            img *= 255.0 / np.amax(img)
+        img = img.astype(np.uint8)
+    basetag = tag
+    basenum = 1
+    while tag in debug.channelNames:
+        basenum += 1
+        tag = f'{basetag}{basenum}'
+    debug.addTile(img, c=len(debug.channelNames))
+    debug.channelNames.append(tag)
 
 
 def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None):
@@ -229,6 +277,7 @@ def main(args):
     if not args.style2 or args.style2.startswith('{#control'):
         args.style2 = None
     with ProgressHelper('Register Images', 'Registering images', args.progress) as prog:
+        debug = large_image.new() if args.outputDebugImage else None
         prog.message('Opening first image')
         ts1 = large_image.open(args.image1, style=args.style1)
         print('Image 1:')
@@ -243,25 +292,60 @@ def main(args):
             reduce *= 2
         print(f'Using reduction factor of {reduce}' if reduce > 1 else
               'Using images at original size')
-        sizeX = int(math.ceil(max(ts1.sizeX, ts2.sizeX) / reduce))
-        sizeY = int(math.ceil(max(ts1.sizeY, ts2.sizeY) / reduce))
+        sizeX = int(math.ceil(max(ts1.sizeX, ts2.sizeX, ts2.sizeY) / reduce))
+        sizeY = int(math.ceil(max(ts1.sizeY, ts2.sizeX, ts2.sizeY) / reduce))
         print(f'Registration size {sizeX} x {sizeY}')
 
         prog.message('Fetching first image')
-        img1 = get_image(ts1, sizeX, sizeY, args.frame1, args.annotationID1, args, reduce)
+        img1 = get_image(ts1, sizeX, sizeY, args.frame1, args.annotationID1, args, reduce, debug)
+        img1 = np.pad(img1, ((0, sizeY - img1.shape[0]),
+                             (0, sizeX - img1.shape[1])), mode='constant')
         prog.message('Fetching second image')
-        img2 = get_image(ts2, sizeX, sizeY, args.frame2, args.annotationID2, args, reduce)
+        img2 = get_image(ts2, sizeX, sizeY, args.frame2, args.annotationID2, args, reduce, debug)
         if isinstance(img1, list) or isinstance(img2, list):
             full = register_points(args, img1, img2)
         else:
             prog.message('Registering')
             sr = pystackreg.StackReg(getattr(
                 pystackreg.StackReg, args.transform, pystackreg.StackReg.AFFINE))
-            sr.register_transform(img1, img2)
+
+            # check four cardinal rotations
+            print('Check rotations')
+            best = None
+            rotMatrix = {
+                0: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+                1: [[0, -1, img2.shape[1]], [1, 0, 0], [0, 0, 1]],
+                2: [[-1, 0, img2.shape[1]], [0, -1, img2.shape[0]], [0, 0, 1]],
+                3: [[0, 1, 0], [-1, 0, img2.shape[0]], [0, 0, 1]],
+            }
+            for rot in range(4):
+                rimg = np.rot90(img2, rot)
+                rimg = np.pad(rimg, ((0, sizeY - rimg.shape[0]),
+                                     (0, sizeX - rimg.shape[1])), mode='constant')
+                timg = sr.register_transform(img1, rimg)
+                debug_image(debug, timg, f'rotation{rot * 90}deg')
+                print(f'Rotation matrix {rot * 90} deg')
+                print(sr.get_matrix())
+                if best is None or np.sum(np.abs(timg - img1)) < best[1]:
+                    best = rot, np.sum(np.abs(timg - img1))
+                    print(f'Current best rotation is {rot * 90} deg, score {best[1]}')
+            if best[0]:
+                print(f'Use rotation of {best[0] * 90} degrees ccw')
+
+            print('Register plain')
+            rot = best[0]
+            rimg = np.rot90(img2, rot)
+            rimg = np.pad(rimg, ((0, sizeY - rimg.shape[0]),
+                                 (0, sizeX - rimg.shape[1])), mode='constant')
+            timg = sr.register_transform(img1, rimg)
+            debug_image(debug, timg, 'transformed')
             prog.message('Registered')
             print('Direct result')
             print(sr.get_matrix())
             full = sr.get_matrix().copy()
+            print('With rotation')
+            full = np.dot(rotMatrix[best[0]], full)
+            print(full)
             full[0][2] *= reduce
             full[1][2] *= reduce
         print('Full result')
@@ -272,6 +356,7 @@ def main(args):
         print('Transforming image')
         prog.message('Transforming')
         transform_images(ts1, ts2, inv, args.outputSecondImage, args.outputMergedImage)
+        debug.write(args.outputDebugImage) if debug else None
 
 
 if __name__ == '__main__':
