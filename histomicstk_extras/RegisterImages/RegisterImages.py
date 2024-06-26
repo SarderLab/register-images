@@ -96,7 +96,7 @@ def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None):
             if args.smallObject:
                 img = skimage.morphology.remove_small_objects(img, args.smallObject / reduce)
                 print(f'Removed small objects, non-zero pixels: {np.sum(img)}')
-                debug_image(debug, img, 'removedSmallA')
+                debug_image(debug, img, 'removedSmallB')
             img = 255.0 * img
 
         debug_image(debug, img, 'processed')
@@ -136,10 +136,15 @@ def debug_image(debug, img, tag):
 def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None):
     if hasattr(matrix, 'tolist'):
         matrix = matrix.tolist()
+    sx, sy = ts1.sizeX, ts1.sizeY
+    for cx, cy in [(0, 0), (ts2.sizeX, 0), (0, ts2.sizeY), (ts2.sizeX, ts2.sizeY)]:
+        txy = np.array(matrix).dot([[cx], [cy], [1]])
+        sx = int(math.ceil(max(sx, txy[0])))
+        sy = int(math.ceil(max(sy, txy[1])))
     trans2 = {
         'name': f'Transform of {os.path.basename(ts2.largeImagePath)}',
-        'width': max(ts1.sizeX, ts2.sizeX),
-        'height': max(ts1.sizeY, ts2.sizeY),
+        'width': sx,
+        'height': sy,
         'backgroundColor': [0, 0, 0],
         'scale': {},
         'sources': [{
