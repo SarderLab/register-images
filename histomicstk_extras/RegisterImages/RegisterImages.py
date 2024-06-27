@@ -147,6 +147,7 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None):
         'height': sy,
         'backgroundColor': [0, 0, 0],
         'scale': {},
+        'dtype': str(ts2.dtype),
         'sources': [{
             'path': ts2.largeImagePath,
             'position': {
