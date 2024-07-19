@@ -304,13 +304,13 @@ def main(args):
 
         prog.message('Fetching first image')
         img1 = get_image(ts1, sizeX, sizeY, args.frame1, args.annotationID1, args, reduce, debug)
-        img1 = np.pad(img1, ((0, sizeY - img1.shape[0]),
-                             (0, sizeX - img1.shape[1])), mode='constant')
         prog.message('Fetching second image')
         img2 = get_image(ts2, sizeX, sizeY, args.frame2, args.annotationID2, args, reduce, debug)
         if isinstance(img1, list) or isinstance(img2, list):
             full = register_points(args, img1, img2)
         else:
+            img1 = np.pad(img1, ((0, sizeY - img1.shape[0]),
+                                 (0, sizeX - img1.shape[1])), mode='constant')
             prog.message('Registering')
             sr = pystackreg.StackReg(getattr(
                 pystackreg.StackReg, args.transform, pystackreg.StackReg.AFFINE))
