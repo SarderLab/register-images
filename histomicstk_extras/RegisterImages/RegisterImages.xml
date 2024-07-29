@@ -50,6 +50,13 @@
       <default>8192</default>
     </integer>
     <boolean>
+      <name>internalscale</name>
+      <longflag>internalscale</longflag>
+      <label>Internal Scale</label>
+      <description>If both images have scale values, use those value as part of the registration.</description>
+      <default>true</default>
+    </boolean>
+    <boolean>
       <name>threshold</name>
       <longflag>threshold</longflag>
       <description>Use thresholding</description>

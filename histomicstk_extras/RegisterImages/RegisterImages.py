@@ -21,6 +21,7 @@ import yaml
 from histomicstk.cli.utils import CLIArgumentParser
 from histomicstk.preprocessing.color_deconvolution.stain_color_map import \
     stain_color_map
+
 from progress_helper import ProgressHelper
 
 
@@ -33,7 +34,7 @@ def annotation_to_shapely(annot, reduce=1):
     ])
 
 
-def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None):
+def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None, rscale=1):
     regionparams = {'format': large_image.constants.TILE_FORMAT_NUMPY}
     try:
         regionparams['frame'] = int(frame)
@@ -51,11 +52,15 @@ def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None):
         if annot['annotation']['elements'][0]['type'] == 'point':
             return annot['annotation']['elements']
         img = (rasterio.features.rasterize(
-            annotation_to_shapely(annot, reduce), out_shape=(sizeY, sizeX)) > 0).astype('bool')
+            annotation_to_shapely(annot, reduce / rscale),
+            out_shape=(sizeY, sizeX)) > 0).astype('bool')
         img = 255.0 * img
         debug_image(debug, img, 'annotation')
     else:
-        regionparams['output'] = dict(maxWidth=ts.sizeX // reduce, maxHeight=ts.sizeY // reduce)
+        regionparams['output'] = {
+            'maxWidth': int(ts.sizeX // reduce * rscale),
+            'maxHeight': int(ts.sizeY // reduce * rscale),
+        }
         img = ts.getRegion(**regionparams)[0]
         print(f'Region shape {img.shape}')
         if len(img.shape) == 3 and img.shape[-1] >= 3:
@@ -133,7 +138,7 @@ def debug_image(debug, img, tag):
     debug.channelNames.append(tag)
 
 
-def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None):
+def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=1):
     if hasattr(matrix, 'tolist'):
         matrix = matrix.tolist()
     sx, sy = ts1.sizeX, ts1.sizeY
@@ -165,7 +170,7 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None):
     for k in {'mm_x', 'mm_y', 'magnfication'}:
         val = ts2.metadata.get(k) or ts1.metadata.get(k) or 0
         if val:
-            trans2['scale'][k] = val
+            trans2['scale'][k] = val / rscale
     print('---')
     print(yaml.dump(trans2, sort_keys=False))
 
@@ -292,20 +297,29 @@ def main(args):
         ts2 = large_image.open(args.image2, style=args.style2)
         print('Image 2:')
         pprint.pprint(ts2.metadata)
-        maxRes = max(ts1.sizeX, ts1.sizeY, ts2.sizeX, ts2.sizeY)
+        rscale = 1
+        if (args.internalscale and ts1.metadata['mm_x'] and
+                ts1.metadata['mm_y'] and ts2.metadata['mm_x'] and ts2.metadata['mm_y']):
+            rscale = math.sqrt(
+                ts2.metadata['mm_x'] * ts2.metadata['mm_y'] /
+                (ts1.metadata['mm_x'] * ts1.metadata['mm_y']))
+            print(f'Image relative scale: {rscale:5.3f}')
+        maxRes = int(max(ts1.sizeX, ts1.sizeY, ts2.sizeX * rscale, ts2.sizeY * rscale))
         reduce = 1
         while math.ceil(maxRes / reduce) >= args.maxResolution:
             reduce *= 2
         print(f'Using reduction factor of {reduce}' if reduce > 1 else
               'Using images at original size')
-        sizeX = int(math.ceil(max(ts1.sizeX, ts2.sizeX, ts2.sizeY) / reduce))
-        sizeY = int(math.ceil(max(ts1.sizeY, ts2.sizeX, ts2.sizeY) / reduce))
+        sizeX = int(math.ceil(max(ts1.sizeX, ts2.sizeX * rscale, ts2.sizeY * rscale) / reduce))
+        sizeY = int(math.ceil(max(ts1.sizeY, ts2.sizeX * rscale, ts2.sizeY * rscale) / reduce))
         print(f'Registration size {sizeX} x {sizeY}')
 
         prog.message('Fetching first image')
-        img1 = get_image(ts1, sizeX, sizeY, args.frame1, args.annotationID1, args, reduce, debug)
+        img1 = get_image(ts1, sizeX, sizeY, args.frame1, args.annotationID1,
+                         args, reduce, debug)
         prog.message('Fetching second image')
-        img2 = get_image(ts2, sizeX, sizeY, args.frame2, args.annotationID2, args, reduce, debug)
+        img2 = get_image(ts2, sizeX, sizeY, args.frame2, args.annotationID2,
+                         args, reduce, debug, rscale)
         if isinstance(img1, list) or isinstance(img2, list):
             full = register_points(args, img1, img2)
         else:
@@ -352,6 +366,8 @@ def main(args):
             print('With rotation')
             full = np.dot(rotMatrix[best[0]], full)
             print(full)
+            if rscale != 1:
+                full = np.dot([[1. / rscale, 0, 0], [0, 1. / rscale, 0], [0, 0, 1]], full)
             full[0][2] *= reduce
             full[1][2] *= reduce
         print('Full result')
@@ -361,7 +377,7 @@ def main(args):
         print(inv)
         print('Transforming image')
         prog.message('Transforming')
-        transform_images(ts1, ts2, inv, args.outputSecondImage, args.outputMergedImage)
+        transform_images(ts1, ts2, inv, args.outputSecondImage, args.outputMergedImage, rscale)
         debug.write(args.outputDebugImage) if debug else None
 
 
