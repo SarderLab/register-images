@@ -46,6 +46,12 @@ def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None, rscale
         except Exception:
             pass
     if annotID:
+        regionparams['output'] = {
+            'maxWidth': int(ts.sizeX // reduce * rscale),
+            'maxHeight': int(ts.sizeY // reduce * rscale),
+        }
+        img = ts.getRegion(**regionparams)[0]
+        debug_image(debug, img, 'source')
         gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
         gc.token = args.girderToken
         annot = gc.get(f'annotation/{annotID.strip()}')
