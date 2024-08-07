@@ -144,6 +144,18 @@ def debug_image(debug, img, tag):
     debug.channelNames.append(tag)
 
 
+def output_image(tmpdir, name, multi, outpath):
+    if outpath.rsplit('.')[-1].lower() in {'yaml', 'yml'}:
+        multi = copy.deepcopy(multi)
+        for source in multi['sources']:
+            source['path'] = os.path.join('.', source['path'].rsplit(os.path.sep, 1)[-1])
+        open(outpath, 'w').write(yaml.dump(multi))
+    else:
+        yamlpath = os.path.join(tmpdir, name)
+        open(yamlpath, 'w').write(yaml.dump(multi))
+        large_image_converter.convert(yamlpath, outpath)
+
+
 def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=1):
     if hasattr(matrix, 'tolist'):
         matrix = matrix.tolist()
@@ -232,13 +244,9 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=
         handler.setLevel(logging.INFO)
         logger.addHandler(handler)
         if out2path:
-            trans2path = os.path.join(tmpdir, 'out2transform.yaml')
-            open(trans2path, 'w').write(yaml.dump(trans2))
-            large_image_converter.convert(trans2path, out2path)
+            output_image(tmpdir, 'out2transform.yaml', trans2, out2path)
         if outmergepath:
-            combopath = os.path.join(tmpdir, 'outmergetransform.yaml')
-            open(combopath, 'w').write(yaml.dump(combo))
-            large_image_converter.convert(combopath, outmergepath)
+            output_image(tmpdir, 'outmergetransform.yaml', combo, outmergepath)
 
 
 def register_points(args, points1, points2):
@@ -344,7 +352,7 @@ def main(args):
                 2: [[-1, 0, img2.shape[1]], [0, -1, img2.shape[0]], [0, 0, 1]],
                 3: [[0, 1, 0], [-1, 0, img2.shape[0]], [0, 0, 1]],
             }
-            for rot in range(4):
+            for rot in range(4 if args.rotations else 1):
                 rimg = np.rot90(img2, rot)
                 rimg = np.pad(rimg, ((0, sizeY - rimg.shape[0]),
                                      (0, sizeX - rimg.shape[1])), mode='constant')
@@ -353,22 +361,19 @@ def main(args):
                 print(f'Rotation matrix {rot * 90} deg')
                 print(sr.get_matrix())
                 if best is None or np.sum(np.abs(timg - img1)) < best[1]:
-                    best = rot, np.sum(np.abs(timg - img1))
+                    best = rot, np.sum(np.abs(timg - img1)), timg, sr.get_matrix().copy()
                     print(f'Current best rotation is {rot * 90} deg, score {best[1]}')
             if best[0]:
                 print(f'Use rotation of {best[0] * 90} degrees ccw')
 
             print('Register plain')
             rot = best[0]
-            rimg = np.rot90(img2, rot)
-            rimg = np.pad(rimg, ((0, sizeY - rimg.shape[0]),
-                                 (0, sizeX - rimg.shape[1])), mode='constant')
-            timg = sr.register_transform(img1, rimg)
+            timg = best[2]
             debug_image(debug, timg, 'transformed')
             prog.message('Registered')
             print('Direct result')
-            print(sr.get_matrix())
-            full = sr.get_matrix().copy()
+            full = best[3]
+            print(full)
             print('With rotation')
             full = np.dot(rotMatrix[best[0]], full)
             print(full)

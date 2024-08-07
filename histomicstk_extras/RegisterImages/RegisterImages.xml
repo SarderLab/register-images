@@ -63,6 +63,13 @@
       <label>Threshold</label>
       <default>true</default>
     </boolean>
+    <boolean>
+      <name>rotations</name>
+      <longflag>rotations</longflag>
+      <description>Try fitting at four cardinal rotations</description>
+      <label>Check Rotations</label>
+      <default>true</default>
+    </boolean>
     <double>
       <name>smallObject</name>
       <longflag>smallobject</longflag>
@@ -109,14 +116,14 @@
       <name>outputSecondImage</name>
       <longflag>outputImage2</longflag>
       <label>Output Second Image</label>
-      <description>The transformed second image</description>
+      <description>The transformed second image.  If the destination file ends in .yaml, a multi-source file that assumes adjacent source images is output.</description>
       <channel>output</channel>
     </image>
     <image fileExtensions=".tiff">
       <name>outputMergedImage</name>
       <longflag>outputMergeImage</longflag>
       <label>Output Merged Image</label>
-      <description>A merged image with the transformed second image and the untransformed first image</description>
+      <description>A merged image with the transformed second image and the untransformed first image.  If the destination file ends in .yaml, a multi-source file that assumes adjacent source images is output.</description>
       <channel>output</channel>
     </image>
     <image fileExtensions=".tiff">
