@@ -207,7 +207,10 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=
                 'path': ts1.largeImagePath,
                 'channel': ['red', 'green', 'blue'][band] if ts1.bandCount >= 3 else 'gray',
                 'z': 0,
-                'c': band + ts2.frames,
+                'c': band + (
+                    ts2.frames
+                    if ts2.metadata.get('IndexRange', {}).get('IndexC', 0) <= 1 else
+                    ts2.metadata['IndexRange']['IndexC']),
                 'style': {'dtype': 'uint8', 'bands': [{'band': band + 1, 'palette': 'white'}]},
             })
     else:
@@ -226,7 +229,9 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=
             combo['sources'].append({
                 'path': ts1.largeImagePath,
                 'z': 0,
-                'c': len(combo['sources']),
+                'c': (len(combo['sources'])
+                      if ts2.metadata.get('IndexRange', {}).get('IndexC', 0) <= 1 else
+                      ts2.metadata['IndexRange']['IndexC']),
             })
     print('---')
     print(yaml.dump(combo, sort_keys=False))
@@ -266,11 +271,11 @@ def register_points(args, points1, points2):
                 labels[label][key] = [pt['center'][0], pt['center'][1]]
     labels = {k: v for k, v in labels.items() if len(v) == 2}
     if len(labels) >= 2:
-        print(f'Using {len(labels)} labeled points: {sorted(labels.keys())}')
         allpts = list(labels.values())
+        print(f'Using {len(allpts)} labeled points: {sorted(labels.keys())}')
     else:
-        print(f'Using {len(labels)} corresponding points')
         allpts = [pt for pt in allpts if len(pt) == 2]
+        print(f'Using {len(allpts)} corresponding points')
     mat = []
     val2 = []
     for pts in allpts:
