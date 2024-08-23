@@ -225,7 +225,8 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=
         combo['singleBand'] = True
         if ts2.frames == 1:
             src = combo['sources'].pop()
-            for band in range(1, 1 if ts1.bandCount < 3 else 3):
+            for band in range(1 if ts2.bandCount < 3 else 3):
+                src = src.copy()
                 src.update({
                     'channel': ['red', 'green', 'blue'][band] if ts2.bandCount >= 3 else 'gray',
                     'z': 0,
@@ -233,14 +234,16 @@ def transform_images(ts1, ts2, matrix, out2path=None, outmergepath=None, rscale=
                     'style': {'dtype': 'uint8', 'bands': [{'band': band + 1, 'palette': 'white'}]},
                 })
                 combo['sources'].append(src)
-        else:
-            combo['sources'].append({
-                'path': ts1.largeImagePath,
-                'z': 0,
-                'c': (len(combo['sources'])
-                      if ts2.metadata.get('IndexRange', {}).get('IndexC', 0) <= 1 else
-                      ts2.metadata['IndexRange']['IndexC']),
-            })
+            if 'channels' in ts1.metadata:
+                combo['channels'] = [
+                    s['channel'] for s in combo['sources']] + ts1.metadata['channels']
+        combo['sources'].append({
+            'path': ts1.largeImagePath,
+            'z': 0,
+            'c': (len(combo['sources'])
+                  if ts2.metadata.get('IndexRange', {}).get('IndexC', 0) <= 1 else
+                  ts2.metadata['IndexRange']['IndexC']),
+        })
     print('---')
     print(yaml.dump(combo, sort_keys=False))
     print('\n---')
