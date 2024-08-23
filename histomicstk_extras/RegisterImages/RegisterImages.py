@@ -34,7 +34,7 @@ def annotation_to_shapely(annot, reduce=1):
     ])
 
 
-def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None, rscale=1):
+def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None, rscale=1):  # noqa
     regionparams = {'format': large_image.constants.TILE_FORMAT_NUMPY}
     try:
         regionparams['frame'] = int(frame)
@@ -54,7 +54,15 @@ def get_image(ts, sizeX, sizeY, frame, annotID, args, reduce, debug=None, rscale
         debug_image(debug, img, 'source')
         gc = girder_client.GirderClient(apiUrl=args.girderApiUrl)
         gc.token = args.girderToken
-        annot = gc.get(f'annotation/{annotID.strip()}')
+        try:
+            annot = gc.get(f'annotation/{annotID.strip()}')
+        except Exception as exc:
+            try:
+                annotID = gc.get('annotation',
+                                 parameters={'name': annotID.strip(), 'limit': 1})[0]['_id']
+                annot = gc.get(f'annotation/{annotID.strip()}')
+            except Exception:
+                raise exc
         if annot['annotation']['elements'][0]['type'] == 'point':
             return annot['annotation']['elements']
         img = (rasterio.features.rasterize(
@@ -302,6 +310,24 @@ def register_points(args, points1, points2):
 def main(args):
     print('\n>> CLI Parameters ...\n')
     pprint.pprint(vars(args))
+    if len({args.image2, args.image1} & {
+            args.outputDebugImage, args.outputSecondImage, args.outputMergedImage}):
+        msg = ('One of the output images has the same file name as one of '
+               'the input images.  Note that this may be the Girder file '
+               'name rather than the item name.')
+        raise Exception(msg)
+    if ((args.outputDebugImage and (
+            args.outputDebugImage == args.outputSecondImage or
+            args.outputDebugImage == args.outputMergedImage)) or (
+            args.outputSecondImage and
+            args.outputSecondImage == args.outputMergedImage)):
+        msg = 'Two of the output images have the same file name.'
+        raise Exception(msg)
+    if ((args.outputDebugImage and os.path.exists(args.outputDebugImage)) or
+            (args.outputSecondImage and os.path.exists(args.outputSecondImage)) or
+            (args.outputMergedImage and os.path.exists(args.outputMergedImage))):
+        msg = 'One of the output images already exists.'
+        raise Exception(msg)
     if not args.style1 or args.style1.startswith('{#control'):
         args.style1 = None
     if not args.style2 or args.style2.startswith('{#control'):
